@@ -8,7 +8,6 @@ module "iam_role" {
   enable_github_oidc = true
 
   oidc_wildcard_subjects = [
-    "repo:yaswanthsai257/devops:*",
     "repo:Henildonda01/DevOps-project-02:*"
   ]
 
