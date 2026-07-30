@@ -1,5 +1,5 @@
 resource "aws_security_group" "chat_app" {
-  name        = "chat-app-${var.env}-sg"
+  name        = "${local.name}-sg"
   description = "Security group for chat application"
 
   ingress {
@@ -30,11 +30,20 @@ resource "aws_security_group" "chat_app" {
   })
 }
 
-resource "aws_instance" "chat_app" {
+module "chat_app" {
+  source  = "terraform-aws-modules/ec2-instance/aws"
+  version = "~> 6.0"
+
+  name = local.name
+
   ami                    = var.ami_id
   instance_type          = var.instance_type
   key_name               = var.key_name
+  subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.chat_app.id]
+
+  create_iam_instance_profile = false
+  monitoring                  = false
 
   user_data = <<-EOF
     #!/bin/bash
@@ -46,7 +55,12 @@ resource "aws_instance" "chat_app" {
     usermod -aG docker ubuntu
   EOF
 
-  tags = merge(local.common_tags, {
-    Name = local.name
-  })
+  tags = local.common_tags
+}
+
+resource "aws_eip" "chat_app" {
+  domain   = "vpc"
+  instance = module.chat_app.id
+
+  tags = local.common_tags
 }

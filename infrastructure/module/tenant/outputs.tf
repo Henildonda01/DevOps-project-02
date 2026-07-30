@@ -1,16 +1,21 @@
 output "instance_id" {
   description = "EC2 instance ID"
-  value       = aws_instance.chat_app.id
+  value       = module.chat_app.id
 }
 
 output "public_ip" {
-  description = "Public IP address of the EC2 instance"
-  value       = aws_instance.chat_app.public_ip
+  description = "Elastic IP address of the EC2 instance"
+  value       = aws_eip.chat_app.public_ip
+}
+
+output "eip_id" {
+  description = "Elastic IP ID"
+  value       = aws_eip.chat_app.id
 }
 
 output "public_dns" {
   description = "Public DNS of the EC2 instance"
-  value       = aws_instance.chat_app.public_dns
+  value       = module.chat_app.public_dns
 }
 
 output "security_group_id" {
@@ -20,10 +25,10 @@ output "security_group_id" {
 
 output "ssh_command" {
   description = "SSH command to connect to the instance"
-  value       = "ssh -i ${var.key_name}.pem ubuntu@${aws_instance.chat_app.public_ip}"
+  value       = "ssh -i ${var.key_name}.pem ubuntu@${aws_eip.chat_app.public_ip}"
 }
 
 output "app_url" {
   description = "URL to access the chat application"
-  value       = "http://${aws_instance.chat_app.public_ip}"
+  value       = "http://${aws_eip.chat_app.public_ip}"
 }

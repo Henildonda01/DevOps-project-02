@@ -2,7 +2,7 @@ module "iam_role" {
   source     = "terraform-aws-modules/iam/aws//modules/iam-role"
   depends_on = [module.iam_oidc_provider]
 
-  name        = "github-actions-deploy-role"
+  name        = "${local.name}-github-actions"
   description = "Role for GitHub Actions to deploy DevOps-project-02"
 
   enable_github_oidc = true
@@ -15,7 +15,5 @@ module "iam_role" {
     AdministratorAccess = "arn:aws:iam::aws:policy/AdministratorAccess"
   }
 
-  tags = {
-    Environment = "dev"
-  }
+  tags = local.common_tags
 }

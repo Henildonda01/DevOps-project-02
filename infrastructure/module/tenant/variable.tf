@@ -36,3 +36,9 @@ variable "allowed_http_cidr" {
   type        = string
   default     = "0.0.0.0/0"
 }
+
+variable "subnet_id" {
+  description = "Subnet ID to launch the instance in. Leave null to use the default VPC's default subnet."
+  type        = string
+  default     = null
+}
