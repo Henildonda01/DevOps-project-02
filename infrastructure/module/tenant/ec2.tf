@@ -55,6 +55,7 @@ module "chat_app" {
   vpc_security_group_ids = [aws_security_group.chat_app.id]
 
   create_iam_instance_profile = false
+  create_security_group       = false
   monitoring                  = false
 
   user_data = <<-EOF
