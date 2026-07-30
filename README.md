@@ -1,51 +1,196 @@
-# DevOps Engineering Assignment: Real-Time Chat App
+# Real-Time Chat Application
 
-Welcome! In this assignment, you are tasked with fixing a broken staging environment for our Real-Time Chat web application. 
+A real-time chat application built with FastAPI (WebSocket) and a vanilla JavaScript frontend, containerized with Docker, reverse-proxied by Nginx, and deployed to AWS EC2 via GitHub Actions CI/CD with Terraform/Terragrunt infrastructure management.
 
-A junior developer recently attempted to containerize this application using Docker and NGINX, but the deployment is currently failing on multiple fronts. Your job is to debug their configuration files and get the application fully operational via Docker Compose.
+## Architecture
 
-## System Architecture
-
-The application is built using two primary containers:
-1. **Backend (`backend`)**: A Python-based FastAPI server operating on Port 8000. It handles persistent, real-time WebSocket connections on the `/ws` endpoint.
-2. **Frontend Proxy (`nginx`)**: An NGINX container mapped to Port 80. It is responsible for serving the static files from the `frontend/` directory, while simultaneously intercepting and reverse-proxying all WebSocket upgrade requests down to the backend container.
-
-### Directory Structure
-```text
-realtime-chat-app/
-├── app/
-│   ├── main.py              # FastAPI application server
-│   └── requirements.txt     # Python dependencies
-├── frontend/
-│   └── index.html           # Simple, styled single-page HTML client
-├── Dockerfile               # Instructions to build the Python backend image
-├── docker-compose.yml       # Composes both NGINX and Python Backend services
-└── nginx.conf               # Configuration for NGINX routing and WS proxy
+```
+┌─────────────────────────────────────────────────────────┐
+│                      Internet                            │
+│                            │                             │
+│                     ┌──────┘──────┐                      │
+│                     │  :80 (EIP)  │                      │
+│                     │   NGINX     │                      │
+│                     └──────┬──────┘                      │
+│                            │                             │
+│                    ┌───────┴────────┐                    │
+│                    │                │                     │
+│           ┌────────┴──┐    ┌───────┴────────┐            │
+│           │  / (HTTP)  │    │  /ws (WS)      │            │
+│           │ Serve      │    │ Proxy to       │            │
+│           │ index.html │    │ backend:8000   │            │
+│           └────────────┘    └───────┬────────┘            │
+│                                     │                     │
+│                          ┌──────────┴──────────┐          │
+│                          │   FastAPI Backend    │          │
+│                          │   Port 8000          │          │
+│                          │   WebSocket /ws      │          │
+│                          └─────────────────────┘          │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## Your Mission
+### Components
 
-If you run `docker-compose up -d --build` right now, the containers will start, but the application will not work. You need to debug and fix the following three critical issues:
+| Component | Technology | Port | Description |
+|-----------|-----------|------|-------------|
+| **Backend** | Python FastAPI | 8000 | WebSocket server, connection management, message broadcasting |
+| **Frontend Proxy** | Nginx | 80 | Serves static HTML, reverse-proxies WebSocket connections |
+| **Infrastructure** | Terraform/Terragrunt | — | AWS provisioning (EC2, IAM, OIDC, EIP) |
+| **CI/CD** | GitHub Actions | — | Automated deploy on push to `main` |
 
-### 1. Fix the Docker Binding (Container Networking)
-The FastAPI backend container is refusing external connections—even from the NGINX container! 
-* **Hint:** Look at how the `uvicorn` command is binding its host in the `Dockerfile`. Inside a Docker container, binding to `localhost` or `127.0.0.1` makes the service unreachable to other containers on the Docker network.
+## Docker Setup
 
-### 2. Fix the Missing User Interface (Volume Mounts)
-If you navigate to `http://localhost` right now, you will likely see the default "Welcome to NGINX" page instead of the chat application.
-* **Hint:** Check `docker-compose.yml`. How is the `nginx` container supposed to get access to the static HTML files located in the local `frontend/` directory? 
+### Dockerfile (Backend)
 
-### 3. Fix the WebSocket Tunnel (Reverse Proxy Configuration)
-Once the UI is visible, the chat app will continuously say "Disconnected" because the WebSocket handshake is failing.
-* **Hint #1:** In `nginx.conf`, the `proxy_pass` is attempting to route to `localhost:8000`. Does `localhost` mean the same thing inside the NGINX container as it does on your laptop? How do containers communicate with each other in a Compose network?
-* **Hint #2:** NGINX requires explicit headers to convert standard HTTP traffic into a persistent WebSocket tunnel. Some of the required `Upgrade` headers appear to be missing or disabled.
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY app/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app/main.py .
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
 
-## Deliverables
+- Binds to `0.0.0.0` so the service is reachable from other containers (binding to `127.0.0.1` would make it container-local only).
 
-Submit your finalized, corrected codebase. We will evaluate your submission by executing:
+### Docker Compose
+
+Two services on a shared Compose network:
+
+```yaml
+services:
+  backend:
+    build: .
+    container_name: chat-backend
+    expose:
+      - "8000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: chat-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+```
+
+### Docker Networking
+
+- Compose creates a default bridge network; containers resolve each other by service name (`backend`, `nginx`).
+- The backend is not exposed to the host — only Nginx reaches it internally via `backend:8000`.
+- Nginx is the sole entry point on port 80.
+
+## Nginx Reverse Proxy
+
+```nginx
+server {
+    listen 80;
+
+    location / {
+        root /usr/share/nginx/html;
+        index index.html;
+    }
+
+    location /ws {
+        proxy_pass http://backend:8000/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+}
+```
+
+- **Static files**: Served from `/usr/share/nginx/html` (mounted from `./frontend`).
+- **WebSocket proxy**: The `/ws` location forwards to `backend:8000/ws` (uses service name, not `localhost`).
+
+## WebSocket Through Nginx
+
+Nginx requires explicit headers to upgrade an HTTP connection to a WebSocket tunnel:
+
+- `proxy_set_header Upgrade $http_upgrade` — passes the client's upgrade request.
+- `proxy_set_header Connection "upgrade"` — tells the upstream server to switch protocols.
+- `proxy_read_timeout 86400s` / `proxy_send_timeout 86400s` — prevents Nginx from closing idle WebSocket connections.
+
+The frontend connects via `ws://<host>/ws` using the `window.location.host` so it works through the reverse proxy without hardcoded URLs.
+
+## CI/CD Pipeline
+
+### Deploy Workflow (`.github/workflows/deploy.yaml`)
+
+On push to `main`:
+1. Checkout code
+2. SSH into EC2 using `appleboy/ssh-action`
+3. Pull latest code, run `docker compose down && docker compose up -d --build`
+
+### Terraform Workflow (`.github/workflows/terraform.yaml`)
+
+Manual `workflow_dispatch`:
+1. Checkout code
+2. Authenticate to AWS via OIDC (IAM role with GitHub Actions trust)
+3. Setup Terraform + Terragrunt
+4. Run `terragrunt init`, `plan`, and optionally `apply`
+
+## Infrastructure (Terraform/Terragrunt)
+
+```
+infrastructure/
+├── config/prod/tenant/terragrunt.hcl   # Terragrunt config (env: prod, region: us-east-1)
+└── module/tenant/
+    ├── ec2.tf       # EC2 instance + Security Group + Elastic IP
+    ├── iam.tf       # IAM role for GitHub Actions (OIDC)
+    ├── oidc.tf      # OIDC provider for GitHub
+    ├── locals.tf    # Common tags & naming
+    ├── outputs.tf   # Instance ID, EIP, SSH command, app URL
+    ├── provider.tf  # AWS provider config
+    └── variable.tf  # Input variables
+```
+
+- EC2 launched in a specific subnet with an Elastic IP.
+- Security group allows HTTP (80) from anywhere and SSH (22) from configurable CIDR.
+- IAM role with `AdministratorAccess` trusted by GitHub's OIDC for CI/CD.
+
+## Issues Found and Fixes
+
+| # | Issue | Root Cause | Fix |
+|---|-------|-----------|-----|
+| 1 | Backend unreachable from Nginx | Uvicorn bound to `127.0.0.1` | Changed `--host` to `0.0.0.0` |
+| 2 | Blank Nginx welcome page | Frontend volume mount was missing in `docker-compose.yml` | Added `./frontend:/usr/share/nginx/html:ro` |
+| 3 | WebSocket handshake failed | `proxy_pass` used `localhost:8000` (inside Nginx container, `localhost` ≠ backend) | Changed to `http://backend:8000/ws` |
+| 4 | WebSocket disconnecting | Missing Upgrade/Connection headers | Added `proxy_set_header Upgrade $http_upgrade` and `Connection "upgrade"` |
+| 5 | `plan` failed: multiple subnets matched | `subnet_id` was `null` and 6 default subnets exist in `us-east-1` | Set `subnet_id` explicitly |
+| 6 | Public IP changes on stop/start | Default public IP is ephemeral | Added Elastic IP and attached to instance |
+
+## Steps to Deploy
+
+### Local (Docker Compose)
 
 ```bash
-docker-compose up -d --build
+git clone https://github.com/Henildonda01/DevOps-project-02.git
+cd DevOps-project-02
+docker compose up -d --build
 ```
 
-If everything is configured correctly, we should instantly see the UI and be able to open multiple browser tabs at `http://localhost` to chat back and forth in real-time. Good luck!
+Open `http://localhost` in multiple browser tabs.
+
+### Production (via CI/CD)
+
+1. Push to `main` — GitHub Actions automatically deploys via SSH.
+2. Or manually trigger Infrastructure deployment:
+   - Go to GitHub → Actions → Terragrunt Init, Plan or Apply
+   - Choose `prod`, `tenant`, optionally check `Apply`
+
+### Prerequisites
+
+- Docker & Docker Compose (local)
+- AWS credentials with permissions (infra)
+- GitHub repository secrets: `EC2_HOST`, `EC2_SSH_KEY`, `AWS_ROLE_ARN`, `AWS_REGION`

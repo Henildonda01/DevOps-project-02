@@ -12,9 +12,9 @@ on:
       environment:
         type: choice
         description: Choose Environment Type
-        default: dev1
+        default: prod
         options:
-          - dev1
+          - prod
 
       module:
         type: choice

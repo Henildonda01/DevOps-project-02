@@ -23,6 +23,12 @@ output "security_group_id" {
   value       = aws_security_group.chat_app.id
 }
 
+output "private_key" {
+  description = "Private key for SSH access. Save this immediately!"
+  value       = tls_private_key.chat_app.private_key_pem
+  sensitive   = true
+}
+
 output "ssh_command" {
   description = "SSH command to connect to the instance"
   value       = "ssh -i ${var.key_name}.pem ubuntu@${aws_eip.chat_app.public_ip}"

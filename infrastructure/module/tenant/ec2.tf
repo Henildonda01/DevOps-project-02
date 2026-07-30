@@ -1,3 +1,15 @@
+resource "tls_private_key" "chat_app" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "chat_app" {
+  key_name   = var.key_name
+  public_key = tls_private_key.chat_app.public_key_openssh
+
+  tags = local.common_tags
+}
+
 resource "aws_security_group" "chat_app" {
   name        = "${local.name}-sg"
   description = "Security group for chat application"
